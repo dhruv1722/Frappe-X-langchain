@@ -2,6 +2,7 @@ langgraph
 langchain
 langchain-openai
 langchain-core
+langchain-mcp-adapters>=0.3.0
 fastapi
 uvicorn
 requests

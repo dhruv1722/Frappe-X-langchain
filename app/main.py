@@ -1,16 +1,17 @@
 
 import logging
+import os
+from uuid import UUID, uuid4
 
 logger = logging.getLogger(__name__)
 
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.graph.graph import graph
-from app.memory import MemoryManager
 
 
 app = FastAPI(
@@ -20,13 +21,12 @@ app = FastAPI(
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
-memory = MemoryManager()
+_THREAD_COOKIE = "frappe_assistant_thread"
+_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "false").lower() in {"1", "true", "yes"}
 
 
 class AskRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
-    user_id: str = Field(min_length=1, max_length=100)
-    conversation_id: str | None = Field(default=None, max_length=100)
 
 
 @app.get("/")
@@ -42,63 +42,26 @@ def health_check():
     }
 
 
+def _thread_id(http_request: Request) -> tuple[str, bool]:
+    supplied_thread_id = http_request.cookies.get(_THREAD_COOKIE)
+    if supplied_thread_id:
+        try:
+            return str(UUID(supplied_thread_id)), False
+        except ValueError:
+            pass
+    return str(uuid4()), True
+
+
 @app.post("/ask")
-def ask(request: AskRequest):
-    user_message = request.message.strip()
-
-    conversation_id = memory.ensure_conversation(
-        user_id=request.user_id,
-        conversation_id=request.conversation_id,
-    )
-
-    forget_response = memory.forget_memory(
-        request.user_id,
-        user_message,
-    )
-    if forget_response:
-        memory.save_message(conversation_id, "user", user_message)
-        memory.save_message(conversation_id, "assistant", forget_response)
-
-        return {
-            "answer": forget_response,
-            "conversation_id": conversation_id,
-            "tool_executed": False,
-            "tool_name": None,
-        }
-
-    saved_memory_response = memory.save_explicit_memory(
-        request.user_id,
-        user_message,
-    )
-    
-    conversation_context = memory.build_context(
-        request.user_id,
-        conversation_id,
-    )
-
-    memory.save_message(conversation_id, "user", user_message)
-
-    initial_state = {
-        "user_message": user_message,
-         "conversation_context": conversation_context,
-        "conversation_context": memory.build_context(
-            request.user_id,
-            conversation_id,
-        ),
-        "today": "",
-        "route": "",
-        "tool_name": "",
-        "tool_parameters": {},
-        "tool_executed": False,
-        "tool_result": {},
-        "validation_error": None,
-        "answer": "",
-        "requires_approval": False,
-        "approved": False,
-    }
+async def ask(chat_request: AskRequest, http_request: Request, response: Response):
+    user_message = chat_request.message.strip()
+    thread_id, is_new_thread = _thread_id(http_request)
 
     try:
-        final_state = graph.invoke(initial_state)
+        final_state = await graph.ainvoke(
+            {"user_message": user_message},
+            config={"configurable": {"thread_id": thread_id}},
+        )
     except Exception:
         logger.exception("POST /ask failed")
         raise HTTPException(
@@ -107,14 +70,19 @@ def ask(request: AskRequest):
         )
     answer = final_state.get("answer", "").strip()
 
-    if saved_memory_response:
-        answer = f"{saved_memory_response}\n\n{answer}"
-
-    memory.save_message(conversation_id, "assistant", answer)
+    if is_new_thread:
+        response.set_cookie(
+            key=_THREAD_COOKIE,
+            value=thread_id,
+            max_age=60 * 60 * 24 * 7,
+            httponly=True,
+            samesite="lax",
+            secure=_COOKIE_SECURE,
+        )
 
     return {
         "answer": answer,
-        "conversation_id": conversation_id,
         "tool_executed": final_state.get("tool_executed", False),
         "tool_name": final_state.get("tool_name"),
+        "presentation": final_state.get("presentation"),
     }

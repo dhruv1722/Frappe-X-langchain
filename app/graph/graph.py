@@ -1,150 +1,40 @@
-from langgraph.graph import (
-    StateGraph,
-    START,
-    END,
-)
-
-from app.graph.state import AgentState
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import END, START, StateGraph
 
 from app.graph.nodes import (
-    router_node,
-    validation_node,
-    resolve_master_links_node,
-    approval_node,
-    execute_tool_node,
-    responder_node,
-    error_node,
-    route_after_router,
-    route_after_validation,
-    route_after_master_link_resolution,
-    route_after_approval,
+    conversation_context_node,
+    coordinator_node,
+    record_turn_node,
+    route_after_coordinator,
+    sales_mcp_node,
+    unavailable_domain_node,
 )
+from app.graph.state import AgentState
 
 
 def build_graph():
-
+    """Route Sales requests to the controlled Sales MCP integration."""
     builder = StateGraph(AgentState)
-
-    # ------------------------------------
-    # Nodes
-    # ------------------------------------
-
-    builder.add_node(
-        "router",
-        router_node,
-    )
-
-    builder.add_node(
-        "validate",
-        validation_node,
-    )
-
-    builder.add_node(
-        "resolve_master_links",
-        resolve_master_links_node,
-    )
-
-    builder.add_node(
-        "approval",
-        approval_node,
-    )
-
-    builder.add_node(
-        "execute",
-        execute_tool_node,
-    )
-
-    builder.add_node(
-        "responder",
-        responder_node,
-    )
-
-    builder.add_node(
-        "error",
-        error_node,
-    )
-
-    # ------------------------------------
-    # START
-    # ------------------------------------
-
-    builder.add_edge(
-        START,
-        "router",
-    )
-
-    # ------------------------------------
-    # Router
-    # ------------------------------------
-
+    builder.add_node("conversation_context", conversation_context_node)
+    builder.add_node("coordinator", coordinator_node)
+    builder.add_node("sales_mcp", sales_mcp_node)
+    builder.add_node("unavailable_domain", unavailable_domain_node)
+    builder.add_node("record_turn", record_turn_node)
+    builder.add_edge(START, "conversation_context")
+    builder.add_edge("conversation_context", "coordinator")
     builder.add_conditional_edges(
-        "router",
-        route_after_router,
+        "coordinator",
+        route_after_coordinator,
         {
-            "responder": "responder",
-            "validate": "validate",
+            "sales_mcp": "sales_mcp",
+            "unavailable_domain": "unavailable_domain",
+            "record_turn": "record_turn",
         },
     )
-
-    # ------------------------------------
-    # Validation
-    # ------------------------------------
-
-    builder.add_conditional_edges(
-        "validate",
-        route_after_validation,
-        {
-            "error": "error",
-            "approval": "resolve_master_links",
-        },
-    )
-
-    builder.add_conditional_edges(
-        "resolve_master_links",
-        route_after_master_link_resolution,
-        {
-            "error": "error",
-            "approval": "approval",
-        },
-    )
-
-    # ------------------------------------
-    # Approval
-    # ------------------------------------
-
-    builder.add_conditional_edges(
-        "approval",
-        route_after_approval,
-        {
-            "error": "error",
-            "execute": "execute",
-        },
-    )
-
-    # ------------------------------------
-    # Tool
-    # ------------------------------------
-
-    builder.add_edge(
-        "execute",
-        "responder",
-    )
-
-    # ------------------------------------
-    # End
-    # ------------------------------------
-
-    builder.add_edge(
-        "responder",
-        END,
-    )
-
-    builder.add_edge(
-        "error",
-        END,
-    )
-
-    return builder.compile()
+    builder.add_edge("sales_mcp", "record_turn")
+    builder.add_edge("unavailable_domain", "record_turn")
+    builder.add_edge("record_turn", END)
+    return builder.compile(checkpointer=MemorySaver())
 
 
 graph = build_graph()

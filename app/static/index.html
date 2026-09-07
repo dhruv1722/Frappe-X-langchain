@@ -48,6 +48,28 @@
       border-radius: 12px;
     }
 
+    .message code {
+      padding: 2px 5px;
+      border-radius: 4px;
+      background: #303030;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 0.9em;
+    }
+
+    .message pre {
+      overflow-x: auto;
+      margin: 12px 0 0;
+      padding: 12px;
+      border-radius: 6px;
+      background: #151515;
+      white-space: pre;
+    }
+
+    .message pre code {
+      padding: 0;
+      background: transparent;
+    }
+
     .user {
       background: #303030;
       margin-left: 10%;
@@ -58,6 +80,32 @@
       border: 1px solid #383838;
       margin-right: 10%;
     }
+
+    .result-card { padding: 0; overflow: hidden; border-color: #454545; }
+    .result-card.preview { border-color: #7d6b33; }
+    .result-card.success { border-color: #2d8057; }
+    .result-card.error { border-color: #a74a4a; }
+    .result-header { display: flex; align-items: center; gap: 9px; padding: 13px 16px; background: #2d2d2d; font-weight: 650; }
+    .result-card.preview .result-header { background: #3b3420; }
+    .result-card.success .result-header { background: #1f3c2f; }
+    .result-card.error .result-header { background: #432525; }
+    .result-icon { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; background: #505050; font-size: 13px; }
+    .result-body { padding: 14px 16px 16px; }
+    .result-summary { margin: 0 0 12px; color: #d2d2d2; }
+    .result-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 10px; margin: 0; }
+    .result-field { padding: 9px 10px; border: 1px solid #424242; border-radius: 8px; background: #202020; }
+    .result-field dt { color: #a9a9a9; font-size: 12px; }
+    .result-field dd { margin: 3px 0 0; overflow-wrap: anywhere; }
+    .result-section { margin-top: 14px; }
+    .result-section-title { margin: 0 0 7px; color: #cfcfcf; font-size: 13px; font-weight: 650; }
+    .result-table-wrap { overflow-x: auto; border: 1px solid #424242; border-radius: 8px; }
+    .result-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .result-table th, .result-table td { padding: 9px 10px; text-align: left; white-space: nowrap; border-bottom: 1px solid #383838; }
+    .result-table th { color: #aaa; background: #202020; font-size: 11px; font-weight: 600; }
+    .result-table tr:last-child td { border-bottom: 0; }
+    .result-actions { display: flex; gap: 9px; margin-top: 15px; }
+    .result-actions button { align-self: auto; }
+    .result-actions .cancel { background: transparent; color: #e7e7e7; border: 1px solid #626262; }
 
     #composer {
       position: fixed;
@@ -127,35 +175,165 @@
   </div>
 
   <script>
-    const userIdKey = "frappe-assistant-user-id";
-    const conversationIdKey = "frappe-assistant-conversation-id";
-
-    const userId = localStorage.getItem(userIdKey)
-      || crypto.randomUUID();
-
-    localStorage.setItem(userIdKey, userId);
+    for (const key of Object.keys(localStorage)) {
+      if (key === "frappe-assistant-user-id" || key === "frappe-assistant-conversation-id"
+        || key.startsWith("frappe-assistant-history-")
+        || key.startsWith("frappe-assistant-pending-approval-")) {
+        localStorage.removeItem(key);
+      }
+    }
 
     const messages = document.getElementById("messages");
     const form = document.getElementById("chat-form");
     const textarea = document.getElementById("message");
     const sendButton = document.getElementById("send");
 
-    function appendMessage(role, text) {
+    function appendMessage(role, text, presentation = null) {
       const item = document.createElement("div");
       item.className = `message ${role}`;
-      item.textContent = text;
+      renderMessage(item, text, presentation, role);
       messages.appendChild(item);
       item.scrollIntoView({ behavior: "smooth", block: "end" });
       return item;
     }
 
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
+    function renderAssistantText(target, text) {
+      const pattern = /(```[\s\S]*?```|`[^`]+`|\*\*[^*]+\*\*)/g;
+      let cursor = 0;
+      for (const match of text.matchAll(pattern)) {
+        target.append(document.createTextNode(text.slice(cursor, match.index)));
+        const value = match[0];
+        if (value.startsWith("```")) {
+          const block = document.createElement("pre");
+          const code = document.createElement("code");
+          code.textContent = value.slice(3, -3).replace(/^\w+\n/, "");
+          block.appendChild(code);
+          target.appendChild(block);
+        } else if (value.startsWith("`")) {
+          const code = document.createElement("code");
+          code.textContent = value.slice(1, -1);
+          target.appendChild(code);
+        } else {
+          const strong = document.createElement("strong");
+          strong.textContent = value.slice(2, -2);
+          target.appendChild(strong);
+        }
+        cursor = match.index + value.length;
+      }
+      target.append(document.createTextNode(text.slice(cursor)));
+    }
 
-      const message = textarea.value.trim();
+    function renderMessage(item, text, presentation = null, role = "assistant") {
+      item.replaceChildren();
+      if (!presentation || !presentation.title) {
+        if (role === "assistant") {
+          renderAssistantText(item, text);
+        } else {
+          item.textContent = text;
+        }
+        return;
+      }
+
+      item.classList.add("result-card", presentation.kind || "info");
+      const header = document.createElement("div");
+      header.className = "result-header";
+      const icon = document.createElement("span");
+      icon.className = "result-icon";
+      icon.textContent = presentation.kind === "success" ? "OK" : presentation.kind === "preview" ? "!" : "i";
+      const title = document.createElement("span");
+      title.textContent = presentation.title;
+      header.append(icon, title);
+
+      const body = document.createElement("div");
+      body.className = "result-body";
+      const summary = document.createElement("p");
+      summary.className = "result-summary";
+      renderAssistantText(summary, presentation.summary || text);
+      body.appendChild(summary);
+
+      if (Array.isArray(presentation.fields) && presentation.fields.length) {
+        const fields = document.createElement("dl");
+        fields.className = "result-fields";
+        presentation.fields.forEach((field) => {
+          const fieldBox = document.createElement("div");
+          fieldBox.className = "result-field";
+          const label = document.createElement("dt");
+          label.textContent = field.label;
+          const value = document.createElement("dd");
+          value.textContent = field.value;
+          fieldBox.append(label, value);
+          fields.appendChild(fieldBox);
+        });
+        body.appendChild(fields);
+      }
+
+      if (Array.isArray(presentation.sections)) {
+        presentation.sections.forEach((section) => {
+          if (!Array.isArray(section.rows) || !section.rows.length) return;
+          const sectionElement = document.createElement("section");
+          sectionElement.className = "result-section";
+          const sectionTitle = document.createElement("h3");
+          sectionTitle.className = "result-section-title";
+          sectionTitle.textContent = section.title;
+          const tableWrap = document.createElement("div");
+          tableWrap.className = "result-table-wrap";
+          const table = document.createElement("table");
+          table.className = "result-table";
+          const columns = Object.keys(section.rows[0]);
+          const head = document.createElement("thead");
+          const headerRow = document.createElement("tr");
+          columns.forEach((column) => {
+            const cell = document.createElement("th");
+            cell.textContent = column;
+            headerRow.appendChild(cell);
+          });
+          head.appendChild(headerRow);
+          const tableBody = document.createElement("tbody");
+          section.rows.forEach((row) => {
+            const tableRow = document.createElement("tr");
+            columns.forEach((column) => {
+              const cell = document.createElement("td");
+              cell.textContent = row[column] || "-";
+              tableRow.appendChild(cell);
+            });
+            tableBody.appendChild(tableRow);
+          });
+          table.append(head, tableBody);
+          tableWrap.appendChild(table);
+          sectionElement.append(sectionTitle, tableWrap);
+          body.appendChild(sectionElement);
+        });
+      }
+
+      if (presentation.actions?.includes("confirm")) {
+        const actions = document.createElement("div");
+        actions.className = "result-actions";
+        const confirmButton = document.createElement("button");
+        confirmButton.type = "button";
+        confirmButton.textContent = "Confirm and create";
+        confirmButton.addEventListener("click", () => {
+          actions.querySelectorAll("button").forEach((button) => { button.disabled = true; });
+          sendMessage("confirm", "Confirm and create");
+        });
+        const cancelButton = document.createElement("button");
+        cancelButton.type = "button";
+        cancelButton.className = "cancel";
+        cancelButton.textContent = "Cancel";
+        cancelButton.addEventListener("click", () => {
+          actions.querySelectorAll("button").forEach((button) => { button.disabled = true; });
+          sendMessage("cancel", "Cancel");
+        });
+        actions.append(confirmButton, cancelButton);
+        body.appendChild(actions);
+      }
+
+      item.append(header, body);
+    }
+
+    async function sendMessage(message, displayMessage = message) {
       if (!message) return;
 
-      appendMessage("user", message);
+      appendMessage("user", displayMessage);
       textarea.value = "";
       textarea.focus();
       sendButton.disabled = true;
@@ -168,8 +346,6 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             message,
-            user_id: userId,
-            conversation_id: localStorage.getItem(conversationIdKey),
           }),
         });
 
@@ -178,15 +354,18 @@
         }
 
         const result = await response.json();
-        localStorage.setItem(conversationIdKey, result.conversation_id);
-        pending.textContent = result.answer || "I could not generate a response.";
+        renderMessage(pending, result.answer || "I could not generate a response.", result.presentation);
       } catch (error) {
         console.error("Ask request failed:", error);
-        pending.textContent =
-          "The assistant could not complete this request. Please try again.";
+        renderMessage(pending, "The assistant could not complete this request. Please try again.");
       } finally {
         sendButton.disabled = false;
       }
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      await sendMessage(textarea.value.trim());
     });
   </script>
 </body>

@@ -7,25 +7,17 @@ services:
     container_name: langchain-ai
 
     environment:
-      FRAPPE_BASE_URL: ${FRAPPE_BASE_URL}
-      FRAPPE_API_KEY: ${FRAPPE_API_KEY}
-      FRAPPE_API_SECRET: ${FRAPPE_API_SECRET}
       GROQ_API_KEY: ${GROQ_API_KEY}
-      MEMORY_DB_PATH: /app/data/memory.sqlite3
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      SALES_MCP_ENABLED: ${SALES_MCP_ENABLED:-false}
+      ERP_MCP_URL: ${ERP_MCP_URL:-}
+      ERP_MCP_SHARED_SECRET: ${ERP_MCP_SHARED_SECRET:-}
+      FRAPPE_MCP_URL: ${FRAPPE_MCP_URL:-}
+      FRAPPE_MCP_SHARED_SECRET: ${FRAPPE_MCP_SHARED_SECRET:-}
 
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    volumes:
-      - ./data:/app/data
     ports:
       - "8000:8000"
 
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
-
-    networks:
-      - excellentpublicity_net
-
-networks:
-  excellentpublicity_net:
-    name: new-ep-devops_excellentpublicity_net
-    external: true
