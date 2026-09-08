@@ -222,25 +222,6 @@ async def _plan_tool_call(
     """Select one bound, non-persistent MCP tool and validate the tool call."""
     safe_tools = [tool for tool in tools if not tool.name.startswith(_CONFIRM_PREFIX)]
     allowed_names = {tool.name for tool in safe_tools}
-    # messages = [
-    #     {
-    #         "role": "system",
-    #         "content": (
-    #             "Use at most one Sales MCP tool when it can answer the request. "
-    #             "Never create or confirm a document. If required details are missing, "
-    #             "ask a short follow-up question instead. The current user request is "
-    #             "authoritative: never substitute one document type for another based on "
-    #             "conversation history. If the MCP catalog has no matching tool, say so; "
-    #             "do not offer or prepare a different document. "
-    #             "When exactly one prepare_sales_order or prepare_quotation tool is "
-    #             "available, this is a continuation of that document: call that tool "
-    #             "with every supplied supported detail (customer, items, delivery date, "
-    #             "company, selling price list, quantity, and explicit item rate). "
-    #             "For questions about required, mandatory, minimum, or available fields, "
-    #             "Never answer those questions from generic ERP knowledge."
-    #         ),
-    #     }
-    # ]
 
     messages = [
         {
